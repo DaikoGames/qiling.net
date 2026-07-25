@@ -199,3 +199,10 @@ jobs:
           ./${{ matrix.py_bin }} -c "import unicorn; print('Unicorn:', unicorn.__version__)"
           ./${{ matrix.py_bin }} -c "import keystone; print('Keystone OK')"
           ./${{ matrix.py_bin }} -c "import capstone; print('Capstone OK')"
+          
+      - name: Upload Built Python Environment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qiling-env-${{ matrix.name }}
+          path: python/
+          if-no-files-found: ignore
