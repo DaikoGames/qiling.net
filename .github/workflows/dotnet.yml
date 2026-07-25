@@ -10,7 +10,6 @@ jobs:
   test-qiling:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-
     strategy:
       fail-fast: false
       matrix:
@@ -21,7 +20,6 @@ jobs:
             arch_triple: "x86_64-unknown-linux-gnu"
             flavor: "install_only"
             py_bin: "python/bin/python3"
-
           - name: "Linux ARM64"
             os: ubuntu-24.04-arm
             arch_triple: "aarch64-unknown-linux-gnu"
@@ -34,7 +32,6 @@ jobs:
             arch_triple: "x86_64-apple-darwin"
             flavor: "install_only"
             py_bin: "python/bin/python3"
-
           - name: "macOS ARM64 (Apple Silicon)"
             os: macos-latest
             arch_triple: "aarch64-apple-darwin"
@@ -48,14 +45,12 @@ jobs:
             flavor: "install_only"
             py_bin: "python/python.exe"
             msvc_arch: "x64"
-
           - name: "Windows x86 (32-bit)"
             os: windows-latest
             arch_triple: "i686-pc-windows-msvc"
             flavor: "install_only"
             py_bin: "python/python.exe"
             msvc_arch: "x86"
-
           - name: "Windows ARM64"
             os: windows-11-arm
             arch_triple: "aarch64-pc-windows-msvc"
@@ -83,10 +78,9 @@ jobs:
           RELEASE_TAG="20260510"
           TRIPLE="${{ matrix.arch_triple }}"
           FLAVOR="${{ matrix.flavor }}"
-          
+
           BASE_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE_TAG}"
           BASE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-${FLAVOR}"
-
           FULL_TAR_GZ_URL="${BASE_URL}/${BASE_NAME}.tar.gz"
           FULL_TAR_ZST_URL="${BASE_URL}/${BASE_NAME}.tar.zst"
           FULL_ZIP_URL="${BASE_URL}/${BASE_NAME}.zip"
@@ -115,85 +109,96 @@ jobs:
 
       - name: Install Qiling & Dependencies
         run: |
+          set -e
           PY_ABS_PATH="$(pwd)/${{ matrix.py_bin }}"
           echo "Python path: $PY_ABS_PATH"
 
           "$PY_ABS_PATH" -m pip install --upgrade pip setuptools wheel ninja cmake
 
           # ----------------------------------------------------
-          # SPECIAL HANDLING: Windows ARM64 Source Compilation
+          # SPECIAL HANDLING: Windows ARM64
           # ----------------------------------------------------
           if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.msvc_arch }}" = "arm64" ]; then
-            echo "Detected Windows ARM64 target. Executing pure Bash source builds for Keystone & Unicorn..."
+            echo "=== Windows ARM64 detected — building native libraries ==="
 
             export CMAKE_GENERATOR="Ninja"
             export CMAKE_BUILD_TYPE="Release"
 
-            # 1. Capstone
+            # 1. Capstone (usually has a wheel or builds cleanly)
+            echo "=== Installing Capstone ==="
             "$PY_ABS_PATH" -m pip install capstone
 
-            # 2. Keystone Engine (Windows ARM64 Build)
+            # 2. Keystone Engine
             echo "=== Building Keystone Engine for Windows ARM64 ==="
             git clone --depth 1 https://github.com/keystone-engine/keystone.git
-            
-            sed -i 's/cmake_minimum_required(VERSION 2.8.12)/cmake_minimum_required(VERSION 3.10)/g' keystone/CMakeLists.txt
-            sed -i 's/cmake_policy(SET CMP0051 OLD)/cmake_policy(SET CMP0051 NEW)/g' keystone/CMakeLists.txt
+
+            # Make CMake happy on modern MSVC
+            sed -i 's/cmake_minimum_required(VERSION 2.8.12)/cmake_minimum_required(VERSION 3.15)/g' keystone/CMakeLists.txt || true
+            sed -i 's/cmake_policy(SET CMP0051 OLD)/cmake_policy(SET CMP0051 NEW)/g' keystone/CMakeLists.txt || true
 
             mkdir -p keystone/build_arm64
             cd keystone/build_arm64
-            cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" ..
+
+            cmake -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_SYSTEM_NAME=Windows \
+              -DCMAKE_SYSTEM_PROCESSOR=ARM64 \
+              -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" \
+              -DBUILD_LIBS_ONLY=ON \
+              ..
+
             ninja
             cd "$GITHUB_WORKSPACE"
 
+            # Install the Python binding
             mkdir -p keystone/bindings/python/keystone
-            find keystone/build_arm64 -name "*.dll" -exec cp {} keystone/bindings/python/keystone/ \;
-
+            find keystone/build_arm64 -name "*.dll" -exec cp -v {} keystone/bindings/python/keystone/ \; || true
             cd keystone/bindings/python
-            "$PY_ABS_PATH" setup.py install
+            "$PY_ABS_PATH" setup.py install --force
             cd "$GITHUB_WORKSPACE"
 
-            # 3. Unicorn Engine (Windows ARM64 Build)
+            # 3. Unicorn Engine — use the experimental Windows ARM64 branch
+            #    (contains the proper setjmp / SEH / TCG fixes from PR #2286)
             echo "=== Building Unicorn Engine for Windows ARM64 ==="
-            git clone --depth 1 https://github.com/unicorn-engine/unicorn.git
-
-            # Patch Unicorn CMake to remove MASM requirements
-            sed -i 's/enable_language(ASM_MASM)/# disabled ASM_MASM/gI' unicorn/CMakeLists.txt
-            sed -i '/setjmp-wrapper-win32\.asm/d' unicorn/CMakeLists.txt
-            echo "" > unicorn/qemu/util/setjmp-wrapper-win32.asm
-
-            # Inject __rdtsc and native setjmp/longjmp wrappers into osdep.h for MSVC ARM64
-            printf '#if defined(_MSC_VER) && defined(_M_ARM64)\n#include <stdint.h>\n#include <setjmp.h>\nstatic inline uint64_t __rdtsc(void) { return 0ULL; }\n#define __rdtsc __rdtsc\n#ifndef uc_qemu_setjmp\n#define uc_qemu_setjmp(env) setjmp(env)\n#endif\n#ifndef uc_qemu_longjmp\n#define uc_qemu_longjmp(env, val) longjmp(env, val)\n#endif\n#endif\n' > rdtsc_patch.h
-            cat rdtsc_patch.h unicorn/qemu/include/qemu/osdep.h > unicorn/qemu/include/qemu/osdep.h.tmp
-            mv unicorn/qemu/include/qemu/osdep.h.tmp unicorn/qemu/include/qemu/osdep.h
-            rm rdtsc_patch.h
+            git clone --depth 1 -b win-arm64-build https://github.com/expend20/unicorn.git
 
             mkdir -p unicorn/build_arm64
             cd unicorn/build_arm64
-            cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DUNICORN_BUILD_TESTS=OFF ..
+
+            cmake -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DUNICORN_BUILD_TESTS=OFF \
+              -DUNICORN_INSTALL=OFF \
+              ..
+
             ninja
             cd "$GITHUB_WORKSPACE"
 
+            # Put the DLLs where the Python binding expects them
             mkdir -p unicorn/bindings/python/unicorn
-            find unicorn/build_arm64 -name "*.dll" -exec cp {} unicorn/bindings/python/unicorn/ \;
+            find unicorn/build_arm64 -name "*.dll" -exec cp -v {} unicorn/bindings/python/unicorn/ \; || true
 
-            # Bypass setup.py build trigger via sed
-            sed -i 's/build_libraries()/pass/g' unicorn/bindings/python/setup.py
-
+            # Prevent setup.py from trying to rebuild the native library
             cd unicorn/bindings/python
-            "$PY_ABS_PATH" setup.py install
+            sed -i 's/build_libraries()/pass  # prebuilt/g' setup.py || true
+            "$PY_ABS_PATH" -m pip install . --no-build-isolation --force-reinstall
             cd "$GITHUB_WORKSPACE"
 
-            # 4. Install Qiling Framework
+            # 4. Qiling itself
+            echo "=== Installing Qiling ==="
             "$PY_ABS_PATH" -m pip install qiling --no-build-isolation
 
           else
             # ----------------------------------------------------
-            # STANDARD HANDLING: All Other Platforms (PyPI Wheels)
+            # STANDARD HANDLING: Everything else (PyPI wheels)
             # ----------------------------------------------------
-            echo "Standard target detected. Installing directly from PyPI..."
+            echo "Standard target — installing from PyPI..."
             "$PY_ABS_PATH" -m pip install keystone-engine capstone unicorn qiling
           fi
 
       - name: Test Qiling Import
         run: |
           ./${{ matrix.py_bin }} -c "import qiling; print('Qiling loaded successfully!')"
+          ./${{ matrix.py_bin }} -c "import unicorn; print('Unicorn:', unicorn.__version__)"
+          ./${{ matrix.py_bin }} -c "import keystone; print('Keystone OK')"
+          ./${{ matrix.py_bin }} -c "import capstone; print('Capstone OK')"
