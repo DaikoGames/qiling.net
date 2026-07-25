@@ -106,7 +106,7 @@ jobs:
         run: |
           ./${{ matrix.py_bin }} --version
           ./${{ matrix.py_bin }} -m pip --version
-
+          
       - name: Install Qiling & Dependencies
         run: |
           set -e
@@ -115,24 +115,20 @@ jobs:
 
           "$PY_ABS_PATH" -m pip install --upgrade pip setuptools wheel ninja cmake
 
-          # ----------------------------------------------------
-          # SPECIAL HANDLING: Windows ARM64
-          # ----------------------------------------------------
           if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.msvc_arch }}" = "arm64" ]; then
             echo "=== Windows ARM64 detected — building native libraries ==="
 
             export CMAKE_GENERATOR="Ninja"
             export CMAKE_BUILD_TYPE="Release"
 
-            # 1. Capstone (usually has a wheel or builds cleanly)
+            # 1. Capstone
             echo "=== Installing Capstone ==="
             "$PY_ABS_PATH" -m pip install capstone
 
-            # 2. Keystone Engine
+            # 2. Keystone
             echo "=== Building Keystone Engine for Windows ARM64 ==="
             git clone --depth 1 https://github.com/keystone-engine/keystone.git
 
-            # Make CMake happy on modern MSVC
             sed -i 's/cmake_minimum_required(VERSION 2.8.12)/cmake_minimum_required(VERSION 3.15)/g' keystone/CMakeLists.txt || true
             sed -i 's/cmake_policy(SET CMP0051 OLD)/cmake_policy(SET CMP0051 NEW)/g' keystone/CMakeLists.txt || true
 
@@ -150,15 +146,13 @@ jobs:
             ninja
             cd "$GITHUB_WORKSPACE"
 
-            # Install the Python binding
             mkdir -p keystone/bindings/python/keystone
             find keystone/build_arm64 -name "*.dll" -exec cp -v {} keystone/bindings/python/keystone/ \; || true
             cd keystone/bindings/python
             "$PY_ABS_PATH" setup.py install --force
             cd "$GITHUB_WORKSPACE"
 
-            # 3. Unicorn Engine — use the experimental Windows ARM64 branch
-            #    (contains the proper setjmp / SEH / TCG fixes from PR #2286)
+            # 3. Unicorn (experimental Windows ARM64 branch)
             echo "=== Building Unicorn Engine for Windows ARM64 ==="
             git clone --depth 1 -b win-arm64-build https://github.com/expend20/unicorn.git
 
@@ -174,24 +168,34 @@ jobs:
             ninja
             cd "$GITHUB_WORKSPACE"
 
-            # Put the DLLs where the Python binding expects them
             mkdir -p unicorn/bindings/python/unicorn
-            find unicorn/build_arm64 -name "*.dll" -exec cp -v {} unicorn/bindings/python/unicorn/ \; || true
+            cp -v unicorn/build_arm64/unicorn.dll unicorn/bindings/python/unicorn/ || true
 
-            # Prevent setup.py from trying to rebuild the native library
+            # Safely disable the native rebuild
             cd unicorn/bindings/python
-            sed -i 's/build_libraries()/pass  # prebuilt/g' setup.py || true
+            "$PY_ABS_PATH" -c "
+          import re, pathlib
+          p = pathlib.Path('setup.py')
+          text = p.read_text(encoding='utf-8')
+          text = re.sub(
+              r'(def build_libraries\s*\([^)]*\):)(.*?)(?=\n(?:def |\S)|\Z)',
+              r'\1\n    return  # using prebuilt unicorn.dll\n',
+              text,
+              count=1,
+              flags=re.S
+          )
+          p.write_text(text, encoding='utf-8')
+          print('Patched setup.py')
+          "
+
             "$PY_ABS_PATH" -m pip install . --no-build-isolation --force-reinstall
             cd "$GITHUB_WORKSPACE"
 
-            # 4. Qiling itself
+            # 4. Qiling
             echo "=== Installing Qiling ==="
             "$PY_ABS_PATH" -m pip install qiling --no-build-isolation
 
           else
-            # ----------------------------------------------------
-            # STANDARD HANDLING: Everything else (PyPI wheels)
-            # ----------------------------------------------------
             echo "Standard target — installing from PyPI..."
             "$PY_ABS_PATH" -m pip install keystone-engine capstone unicorn qiling
           fi
