@@ -123,11 +123,10 @@ jobs:
 
           if [ "${{ runner.os }}" = "Windows" ]; then
             export CMAKE_GENERATOR="Ninja"
-            export CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_POLICY_DEFAULT_CMP0051=NEW -DCMAKE_BUILD_TYPE=Release"
-            export CMAKE_POLICY_VERSION_MINIMUM=3.5
+            export CMAKE_BUILD_TYPE="Release"
           fi
 
-          ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel ninja
+          ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel ninja "cmake<4.0.0"
           ./${{ matrix.py_bin }} -m pip install --no-build-isolation keystone-engine capstone unicorn
           ./${{ matrix.py_bin }} -m pip install qiling
 
