@@ -89,17 +89,19 @@ jobs:
 
           echo "Attempting download for target: ${TRIPLE} (${FLAVOR})"
 
-          if curl -sSL -f -o python_archive "$BASE_URL/${BASE_NAME}.tar.zst"; then
+          if curl -sSL -f -o python_archive.zip "$BASE_URL/${BASE_NAME}.zip"; then
+            echo "Downloaded ${BASE_NAME}.zip"
+            unzip -q python_archive.zip
+          elif curl -sSL -f -o python_archive.tar.zst "$BASE_URL/${BASE_NAME}.tar.zst"; then
             echo "Downloaded ${BASE_NAME}.tar.zst"
-          elif curl -sSL -f -o python_archive "$BASE_URL/${BASE_NAME}.tar.gz"; then
+            tar -xf python_archive.tar.zst
+          elif curl -sSL -f -o python_archive.tar.gz "$BASE_URL/${BASE_NAME}.tar.gz"; then
             echo "Downloaded ${BASE_NAME}.tar.gz"
+            tar -xf python_archive.tar.gz
           else
             echo "Failed to locate archive asset on GitHub releases."
             exit 1
           fi
-
-          echo "Extracting archive..."
-          tar -xf python_archive
 
       - name: Verify Python & Pip
         run: |
