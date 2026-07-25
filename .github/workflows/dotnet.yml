@@ -162,22 +162,7 @@ jobs:
             echo "" > unicorn/qemu/util/setjmp-wrapper-win32.asm
 
             # Inject __rdtsc and native setjmp/longjmp wrappers into osdep.h for MSVC ARM64
-            cat << 'EOF' > rdtsc_patch.h
-#if defined(_MSC_VER) && defined(_M_ARM64)
-#include <stdint.h>
-#include <setjmp.h>
-static inline uint64_t __rdtsc(void) {
-    return 0ULL;
-}
-#define __rdtsc __rdtsc
-#ifndef uc_qemu_setjmp
-#define uc_qemu_setjmp(env) setjmp(env)
-#endif
-#ifndef uc_qemu_longjmp
-#define uc_qemu_longjmp(env, val) longjmp(env, val)
-#endif
-#endif
-EOF
+            printf '#if defined(_MSC_VER) && defined(_M_ARM64)\n#include <stdint.h>\n#include <setjmp.h>\nstatic inline uint64_t __rdtsc(void) { return 0ULL; }\n#define __rdtsc __rdtsc\n#ifndef uc_qemu_setjmp\n#define uc_qemu_setjmp(env) setjmp(env)\n#endif\n#ifndef uc_qemu_longjmp\n#define uc_qemu_longjmp(env, val) longjmp(env, val)\n#endif\n#endif\n' > rdtsc_patch.h
             cat rdtsc_patch.h unicorn/qemu/include/qemu/osdep.h > unicorn/qemu/include/qemu/osdep.h.tmp
             mv unicorn/qemu/include/qemu/osdep.h.tmp unicorn/qemu/include/qemu/osdep.h
             rm rdtsc_patch.h
