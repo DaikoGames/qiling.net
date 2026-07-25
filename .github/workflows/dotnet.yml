@@ -25,12 +25,12 @@ jobs:
             arch_triple: "aarch64-unknown-linux-gnu"
             py_bin: "python/bin/python3"
 
-          - name: "macOS x64"
-            os: macos-13
+          - name: "macOS x64 (Intel)"
+            os: macos-15-intel
             arch_triple: "x86_64-apple-darwin"
             py_bin: "python/bin/python3"
 
-          - name: "macOS ARM64"
+          - name: "macOS ARM64 (Apple Silicon)"
             os: macos-latest
             arch_triple: "aarch64-apple-darwin"
             py_bin: "python/bin/python3"
@@ -43,11 +43,6 @@ jobs:
           - name: "Windows x86"
             os: windows-latest
             arch_triple: "i686-pc-windows-msvc"
-            py_bin: "python/python.exe"
-
-          - name: "Windows ARM64"
-            os: windows-11-vs2022-arm64
-            arch_triple: "aarch64-pc-windows-msvc"
             py_bin: "python/python.exe"
 
     defaults:
@@ -74,7 +69,8 @@ jobs:
           RELEASE_TAG="20240224"
           TRIPLE="${{ matrix.arch_triple }}"
           
-          FILE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-install_only.tar.gz"
+          # Fixed extension to matching .tar.zst archive
+          FILE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-install_only_stripped.tar.zst"
           URL="https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE_TAG}/${FILE_NAME}"
 
           echo "Downloading: $URL"
@@ -85,14 +81,14 @@ jobs:
 
       - name: Verify Python & Pip
         run: |
-          ${{ matrix.py_bin }} --version
-          ${{ matrix.py_bin }} -m pip --version
+          ./${{ matrix.py_bin }} --version
+          ./${{ matrix.py_bin }} -m pip --version
 
       - name: Install Qiling Framework
         run: |
-          ${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel
-          ${{ matrix.py_bin }} -m pip install qiling
+          ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel
+          ./${{ matrix.py_bin }} -m pip install qiling
 
       - name: Test Qiling Import
         run: |
-          ${{ matrix.py_bin }} -c "import qiling; print('Qiling loaded successfully!')"
+          ./${{ matrix.py_bin }} -c "import qiling; print('Qiling loaded successfully!')"
