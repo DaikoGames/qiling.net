@@ -79,27 +79,32 @@ jobs:
 
       - name: Download & Extract Standalone Python
         run: |
-          PYTHON_VER="3.11.5"
-          RELEASE_TAG="20260718"
+          PYTHON_VER="3.12.13"
+          RELEASE_TAG="20260510"
           TRIPLE="${{ matrix.arch_triple }}"
           FLAVOR="${{ matrix.flavor }}"
           
           BASE_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE_TAG}"
           BASE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-${FLAVOR}"
 
-          echo "Attempting download for target: ${TRIPLE} (${FLAVOR})"
+          FULL_TAR_GZ_URL="${BASE_URL}/${BASE_NAME}.tar.gz"
+          FULL_TAR_ZST_URL="${BASE_URL}/${BASE_NAME}.tar.zst"
+          FULL_ZIP_URL="${BASE_URL}/${BASE_NAME}.zip"
 
-          if curl -sSL -f -o python_archive.zip "$BASE_URL/${BASE_NAME}.zip"; then
-            echo "Downloaded ${BASE_NAME}.zip"
-            unzip -q python_archive.zip
-          elif curl -sSL -f -o python_archive.tar.zst "$BASE_URL/${BASE_NAME}.tar.zst"; then
-            echo "Downloaded ${BASE_NAME}.tar.zst"
-            tar -xf python_archive.tar.zst
-          elif curl -sSL -f -o python_archive.tar.gz "$BASE_URL/${BASE_NAME}.tar.gz"; then
-            echo "Downloaded ${BASE_NAME}.tar.gz"
+          echo "Target Triple: ${TRIPLE}"
+          echo "Checking URL: ${FULL_TAR_GZ_URL}"
+
+          if curl -sSL -f -o python_archive.tar.gz "$FULL_TAR_GZ_URL"; then
+            echo "Downloaded from: ${FULL_TAR_GZ_URL}"
             tar -xf python_archive.tar.gz
+          elif curl -sSL -f -o python_archive.tar.zst "$FULL_TAR_ZST_URL"; then
+            echo "Downloaded from: ${FULL_TAR_ZST_URL}"
+            tar -xf python_archive.tar.zst
+          elif curl -sSL -f -o python_archive.zip "$FULL_ZIP_URL"; then
+            echo "Downloaded from: ${FULL_ZIP_URL}"
+            unzip -q python_archive.zip
           else
-            echo "Failed to locate archive asset on GitHub releases."
+            echo "Error: Failed to download asset from ${BASE_URL}"
             exit 1
           fi
 
