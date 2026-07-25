@@ -124,19 +124,20 @@ jobs:
           # SPECIAL HANDLING: Windows ARM64 Source Compilation
           # ----------------------------------------------------
           if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.msvc_arch }}" = "arm64" ]; then
-            echo "Detected Windows ARM64 target. Executing custom source builds for Keystone & Unicorn..."
+            echo "Detected Windows ARM64 target. Executing pure Bash source builds for Keystone & Unicorn..."
 
             export CMAKE_GENERATOR="Ninja"
             export CMAKE_BUILD_TYPE="Release"
 
-            # 1. Install Capstone
+            # 1. Capstone
             "$PY_ABS_PATH" -m pip install capstone
 
-            # 2. Keystone Engine (Native Windows ARM64 Build)
+            # 2. Keystone Engine (Windows ARM64 Build)
             echo "=== Building Keystone Engine for Windows ARM64 ==="
             git clone --depth 1 https://github.com/keystone-engine/keystone.git
             
-            "$PY_ABS_PATH" -c "p='keystone/CMakeLists.txt'; f=open(p); c=f.read().replace('cmake_minimum_required(VERSION 2.8.12)', 'cmake_minimum_required(VERSION 3.10)').replace('cmake_policy(SET CMP0051 OLD)', 'cmake_policy(SET CMP0051 NEW)'); open(p,'w').write(c)"
+            sed -i 's/cmake_minimum_required(VERSION 2.8.12)/cmake_minimum_required(VERSION 3.10)/g' keystone/CMakeLists.txt
+            sed -i 's/cmake_policy(SET CMP0051 OLD)/cmake_policy(SET CMP0051 NEW)/g' keystone/CMakeLists.txt
 
             mkdir -p keystone/build_arm64
             cd keystone/build_arm64
@@ -151,45 +152,28 @@ jobs:
             "$PY_ABS_PATH" setup.py install
             cd "$GITHUB_WORKSPACE"
 
-            # 3. Unicorn Engine (Native Windows ARM64 Build)
+            # 3. Unicorn Engine (Windows ARM64 Build)
             echo "=== Building Unicorn Engine for Windows ARM64 ==="
             git clone --depth 1 https://github.com/unicorn-engine/unicorn.git
 
-            # Patch Unicorn source files for ARM64 MSVC compatibility
-            "$PY_ABS_PATH" -c "
-            import re, os
+            # Patch Unicorn CMake to remove MASM and the assembly wrapper file
+            sed -i 's/enable_language(ASM_MASM)/# disabled ASM_MASM/gI' unicorn/CMakeLists.txt
+            sed -i '/setjmp-wrapper-win32\.asm/d' unicorn/CMakeLists.txt
+            > unicorn/qemu/util/setjmp-wrapper-win32.asm
 
-            # A. Strip x86 MASM assembler & setjmp win32 wrapper references
-            cm = 'unicorn/CMakeLists.txt'
-            if os.path.exists(cm):
-                with open(cm, 'r', encoding='utf-8') as f:
-                    c = f.read()
-                c = re.sub(r'(?i)enable_language\s*\(\s*ASM_MASM\s*\)', '# disabled ASM_MASM', c)
-                c = re.sub(r'.*setjmp-wrapper-win32\.asm.*', '', c)
-                with open(cm, 'w', encoding='utf-8') as f:
-                    f.write(c)
-
-            # B. Clear setjmp-wrapper-win32.asm content
-            asm = 'unicorn/qemu/util/setjmp-wrapper-win32.asm'
-            if os.path.exists(asm):
-                with open(asm, 'w', encoding='utf-8') as f:
-                    f.write('')
-
-            # C. Define __rdtsc() macro in qemu/osdep.h
-            osdep = 'unicorn/qemu/include/qemu/osdep.h'
-            if os.path.exists(osdep):
-                with open(osdep, 'r', encoding='utf-8') as f:
-                    c = f.read()
-                patch = '\n#ifndef __rdtsc\n#define __rdtsc() (0ULL)\n#endif\n'
-                with open(osdep, 'w', encoding='utf-8') as f:
-                    f.write(patch + c)
-
-            # D. Add C fallback definition for __rdtsc() in uc.c for linker resolution
-            uc = 'unicorn/uc.c'
-            if os.path.exists(uc):
-                with open(uc, 'a', encoding='utf-8') as f:
-                    f.write('\n#include <stdint.h>\nuint64_t __rdtsc(void) { return 0ULL; }\n')
-            "
+            # Prepend __rdtsc inline stub to qemu/osdep.h for MSVC ARM64
+            cat << 'EOF' > rdtsc_patch.h
+            #if defined(_MSC_VER) && defined(_M_ARM64)
+            #include <stdint.h>
+            static inline uint64_t __rdtsc(void) {
+                return 0ULL;
+            }
+            #define __rdtsc __rdtsc
+            #endif
+            EOF
+            cat rdtsc_patch.h unicorn/qemu/include/qemu/osdep.h > unicorn/qemu/include/qemu/osdep.h.tmp
+            mv unicorn/qemu/include/qemu/osdep.h.tmp unicorn/qemu/include/qemu/osdep.h
+            rm rdtsc_patch.h
 
             mkdir -p unicorn/build_arm64
             cd unicorn/build_arm64
@@ -200,8 +184,8 @@ jobs:
             mkdir -p unicorn/bindings/python/unicorn
             find unicorn/build_arm64 -name "*.dll" -exec cp {} unicorn/bindings/python/unicorn/ \;
 
-            # Bypass setup.py build_libraries() trigger to prevent rebuild attempts
-            "$PY_ABS_PATH" -c "p='unicorn/bindings/python/setup.py'; f=open(p); c=f.read().replace('build_libraries()', 'pass'); open(p,'w').write(c)"
+            # Bypass setup.py build trigger via sed
+            sed -i 's/build_libraries()/pass/g' unicorn/bindings/python/setup.py
 
             cd unicorn/bindings/python
             "$PY_ABS_PATH" setup.py install
@@ -214,7 +198,7 @@ jobs:
             # ----------------------------------------------------
             # STANDARD HANDLING: All Other Platforms (PyPI Wheels)
             # ----------------------------------------------------
-            echo "Standard platform detected. Installing from PyPI..."
+            echo "Standard target detected. Installing directly from PyPI..."
             "$PY_ABS_PATH" -m pip install keystone-engine capstone unicorn qiling
           fi
 
