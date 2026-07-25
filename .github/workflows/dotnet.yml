@@ -139,10 +139,10 @@ jobs:
             # Patch Keystone CMake policy
             "$PY_ABS_PATH" -c "p='keystone/CMakeLists.txt'; f=open(p); c=f.read().replace('cmake_minimum_required(VERSION 2.8.12)', 'cmake_minimum_required(VERSION 3.10)').replace('cmake_policy(SET CMP0051 OLD)', 'cmake_policy(SET CMP0051 NEW)'); open(p,'w').write(c)"
 
-            # Compile Keystone via Ninja for ARM64
+            # Build Keystone C/C++ DLL via Ninja for ARM64
             mkdir -p keystone/build_arm64
             cd keystone/build_arm64
-            cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DLLVM_TARGETS_TO_BUILD="AArch64;X86" ..
+            cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" ..
             ninja
             cd "$GITHUB_WORKSPACE"
 
@@ -161,10 +161,13 @@ jobs:
             echo "=== Building Unicorn Engine for ARM64 ==="
             git clone --depth 1 https://github.com/unicorn-engine/unicorn.git
 
-            # Patch Unicorn CMakeLists.txt to disable x86 MASM assembler on Windows ARM64
-            "$PY_ABS_PATH" -c "p='unicorn/CMakeLists.txt'; f=open(p); c=f.read().replace('qemu/util/setjmp-wrapper-win32.asm', '').replace('enable_language(ASM_MASM)', ''); open(p,'w').write(c)"
+            # 1. Disable MASM assembler and setjmp x86 wrapper on Windows ARM64
+            "$PY_ABS_PATH" -c "p='unicorn/CMakeLists.txt'; f=open(p); c=f.read().replace('enable_language(ASM_MASM)', '').replace('qemu/util/setjmp-wrapper-win32.asm', ''); open(p,'w').write(c)"
 
-            # Compile Unicorn via Ninja for ARM64
+            # 2. Fix unresolved __rdtsc() linker symbol across all unicorn source files
+            "$PY_ABS_PATH" -c "import os; [open(os.path.join(r, fn), 'w', encoding='utf-8').write(open(os.path.join(r, fn), 'r', encoding='utf-8', errors='ignore').read().replace('__rdtsc()', '0ULL')) for r, d, fs in os.walk('unicorn') for fn in fs if fn.endswith(('.c', '.h'))]"
+
+            # Build Unicorn C/C++ DLL via Ninja for ARM64
             mkdir -p unicorn/build_arm64
             cd unicorn/build_arm64
             cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DUNICORN_BUILD_TESTS=OFF ..
@@ -175,7 +178,7 @@ jobs:
             mkdir -p unicorn/bindings/python/unicorn
             find unicorn/build_arm64 -name "unicorn.dll" -exec cp {} unicorn/bindings/python/unicorn/ \;
 
-            # Patch Unicorn setup.py to bypass setup.py's internal build trigger
+            # Patch Unicorn setup.py to bypass build_libraries()
             "$PY_ABS_PATH" -c "p='unicorn/bindings/python/setup.py'; f=open(p); c=f.read().replace('build_libraries()', 'pass'); open(p,'w').write(c)"
 
             cd unicorn/bindings/python
