@@ -123,11 +123,18 @@ jobs:
 
           if [ "${{ runner.os }}" = "Windows" ]; then
             export CMAKE_GENERATOR="Ninja"
-            export CMAKE_BUILD_TYPE="Release"
+            export CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release"
           fi
 
           ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel ninja "cmake<4.0.0"
-          ./${{ matrix.py_bin }} -m pip install --no-build-isolation keystone-engine capstone unicorn
+
+          ./${{ matrix.py_bin }} -m pip install --no-build-isolation \
+            --config-settings="setup-args=-DCMAKE_POLICY_VERSION_MINIMUM=3.5" \
+            keystone-engine capstone unicorn || \
+          ./${{ matrix.py_bin }} -m pip install --no-build-isolation \
+            --config-settings="cmake.define.CMAKE_POLICY_VERSION_MINIMUM=3.5" \
+            keystone-engine capstone unicorn
+
           ./${{ matrix.py_bin }} -m pip install qiling
 
       - name: Test Qiling Import
