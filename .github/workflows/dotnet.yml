@@ -79,8 +79,8 @@ jobs:
 
       - name: Download & Extract Standalone Python
         run: |
-          PYTHON_VER="3.11.8"
-          RELEASE_TAG="20240224"
+          PYTHON_VER="3.12.8"
+          RELEASE_TAG="20241206"
           TRIPLE="${{ matrix.arch_triple }}"
           FLAVOR="${{ matrix.flavor }}"
           
