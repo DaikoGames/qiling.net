@@ -127,9 +127,10 @@ jobs:
           if [ "$OS" = "Windows" ] && [ "$MSVC_ARCH" = "arm64" ]; then
             echo "=== Windows ARM64 special path ==="
 
+            # Capstone
             "$PY_ABS_PATH" -m pip install capstone
 
-            # Keystone
+            # Keystone from source
             git clone --depth 1 https://github.com/keystone-engine/keystone.git
             cd keystone
             mkdir build && cd build
@@ -142,7 +143,7 @@ jobs:
             "$PY_ABS_PATH" setup.py install --force
             cd "$GITHUB_WORKSPACE"
 
-            # Unicorn (experimental branch)
+            # Unicorn from experimental Windows ARM64 branch
             git clone --depth 1 -b win-arm64-build https://github.com/expend20/unicorn.git
             cd unicorn
             mkdir build && cd build
@@ -150,20 +151,22 @@ jobs:
                   -DUNICORN_BUILD_TESTS=OFF -DUNICORN_INSTALL=OFF ..
             ninja
             cd ../bindings/python
-            mkdir -p unicorn
-            cp -v ../../build/unicorn.dll unicorn/ || true
 
-            # Very simple patch – just make build_libraries do nothing
+            # Put the DLL exactly where the modern binding looks for it
+            mkdir -p unicorn/lib
+            cp -v ../../build/unicorn.dll unicorn/lib/ || true
+
+            # Disable the native rebuild
             sed -i 's/def build_libraries():/def build_libraries():\n    return/' setup.py || true
 
             "$PY_ABS_PATH" -m pip install . --no-build-isolation --force-reinstall
             cd "$GITHUB_WORKSPACE"
 
-            # Important: do NOT let pip try to download unicorn again
+            # Important: do not let pip download unicorn from PyPI
             "$PY_ABS_PATH" -m pip install qiling --no-deps --no-build-isolation
 
           # --------------------------------------------------
-          # macOS ARM64 (Keystone has no arm64 wheel)
+          # macOS ARM64 (Keystone has no official arm64 wheel)
           # --------------------------------------------------
           elif [ "$OS" = "macOS" ] && [ "$ARCH" = "aarch64-apple-darwin" ]; then
             echo "=== macOS ARM64 special path ==="
@@ -183,7 +186,7 @@ jobs:
             "$PY_ABS_PATH" -m pip install capstone unicorn qiling
 
           # --------------------------------------------------
-          # Everything else
+          # Everything else (normal wheels)
           # --------------------------------------------------
           else
             echo "=== Standard path ==="
