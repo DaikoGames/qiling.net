@@ -106,7 +106,7 @@ jobs:
         run: |
           ./${{ matrix.py_bin }} --version
           ./${{ matrix.py_bin }} -m pip --version
-          
+
       - name: Install Qiling & Dependencies
         run: |
           set -e
@@ -115,88 +115,78 @@ jobs:
 
           "$PY_ABS_PATH" -m pip install --upgrade pip setuptools wheel ninja cmake
 
+          # ----------------------------------------------------
+          # Windows ARM64
+          # ----------------------------------------------------
           if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.msvc_arch }}" = "arm64" ]; then
-            echo "=== Windows ARM64 detected — building native libraries ==="
+            echo "=== Windows ARM64 — building native libraries ==="
 
-            export CMAKE_GENERATOR="Ninja"
-            export CMAKE_BUILD_TYPE="Release"
-
-            # 1. Capstone
-            echo "=== Installing Capstone ==="
+            # Capstone (has a usable wheel)
             "$PY_ABS_PATH" -m pip install capstone
 
-            # 2. Keystone
-            echo "=== Building Keystone Engine for Windows ARM64 ==="
+            # Keystone from source
             git clone --depth 1 https://github.com/keystone-engine/keystone.git
-
             sed -i 's/cmake_minimum_required(VERSION 2.8.12)/cmake_minimum_required(VERSION 3.15)/g' keystone/CMakeLists.txt || true
-            sed -i 's/cmake_policy(SET CMP0051 OLD)/cmake_policy(SET CMP0051 NEW)/g' keystone/CMakeLists.txt || true
-
-            mkdir -p keystone/build_arm64
-            cd keystone/build_arm64
-
-            cmake -G "Ninja" \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_SYSTEM_NAME=Windows \
-              -DCMAKE_SYSTEM_PROCESSOR=ARM64 \
-              -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" \
-              -DBUILD_LIBS_ONLY=ON \
-              ..
-
+            mkdir -p keystone/build && cd keystone/build
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_LIBS_ONLY=ON \
+                  -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" ..
             ninja
-            cd "$GITHUB_WORKSPACE"
-
-            mkdir -p keystone/bindings/python/keystone
-            find keystone/build_arm64 -name "*.dll" -exec cp -v {} keystone/bindings/python/keystone/ \; || true
-            cd keystone/bindings/python
+            cd ../bindings/python
+            mkdir -p keystone
+            find ../../build -name "*.dll" -exec cp {} keystone/ \; || true
             "$PY_ABS_PATH" setup.py install --force
             cd "$GITHUB_WORKSPACE"
 
-            # 3. Unicorn (experimental Windows ARM64 branch)
-            echo "=== Building Unicorn Engine for Windows ARM64 ==="
+            # Unicorn from the experimental Windows ARM64 branch
             git clone --depth 1 -b win-arm64-build https://github.com/expend20/unicorn.git
-
-            mkdir -p unicorn/build_arm64
-            cd unicorn/build_arm64
-
-            cmake -G "Ninja" \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DUNICORN_BUILD_TESTS=OFF \
-              -DUNICORN_INSTALL=OFF \
-              ..
-
+            mkdir -p unicorn/build && cd unicorn/build
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DUNICORN_BUILD_TESTS=OFF -DUNICORN_INSTALL=OFF ..
             ninja
-            cd "$GITHUB_WORKSPACE"
+            cd ../bindings/python
+            mkdir -p unicorn
+            cp -v ../../build/unicorn.dll unicorn/ || true
 
-            mkdir -p unicorn/bindings/python/unicorn
-            cp -v unicorn/build_arm64/unicorn.dll unicorn/bindings/python/unicorn/ || true
-
-            # Safely disable the native rebuild
-            cd unicorn/bindings/python
-            "$PY_ABS_PATH" -c "
+            # Disable the rebuild and force a high enough version
+            "$PY_ABS_PATH" -c '
           import re, pathlib
-          p = pathlib.Path('setup.py')
-          text = p.read_text(encoding='utf-8')
-          text = re.sub(
-              r'(def build_libraries\s*\([^)]*\):)(.*?)(?=\n(?:def |\S)|\Z)',
-              r'\1\n    return  # using prebuilt unicorn.dll\n',
-              text,
-              count=1,
-              flags=re.S
-          )
-          p.write_text(text, encoding='utf-8')
-          print('Patched setup.py')
-          "
-
+          p = pathlib.Path("setup.py")
+          text = p.read_text(encoding="utf-8")
+          text = re.sub(r"(def build_libraries\s*\([^)]*\):)(.*?)(?=\n(?:def |\S)|\Z)",
+                        r"\1\n    return\n", text, count=1, flags=re.S)
+          text = re.sub(r"version\s*=\s*[\"\'][^\"\']+[\"\']", "version=\"2.1.4\"", text)
+          p.write_text(text, encoding="utf-8")
+          print("Patched setup.py")
+          '
             "$PY_ABS_PATH" -m pip install . --no-build-isolation --force-reinstall
             cd "$GITHUB_WORKSPACE"
 
-            # 4. Qiling
-            echo "=== Installing Qiling ==="
-            "$PY_ABS_PATH" -m pip install qiling --no-build-isolation
+            # Qiling must NOT try to pull unicorn from PyPI
+            "$PY_ABS_PATH" -m pip install qiling --no-deps --no-build-isolation
 
+          # ----------------------------------------------------
+          # macOS ARM64 (Keystone has no arm64 wheel)
+          # ----------------------------------------------------
+          elif [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.arch_triple }}" = "aarch64-apple-darwin" ]; then
+            echo "=== macOS ARM64 — building Keystone from source ==="
+
+            git clone --depth 1 https://github.com/keystone-engine/keystone.git
+            mkdir -p keystone/build && cd keystone/build
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_LIBS_ONLY=ON \
+                  -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" ..
+            ninja
+            cd ../bindings/python
+            mkdir -p keystone
+            find ../../build -name "libkeystone*.dylib" -exec cp {} keystone/ \; || true
+            "$PY_ABS_PATH" setup.py install --force
+            cd "$GITHUB_WORKSPACE"
+
+            "$PY_ABS_PATH" -m pip install capstone unicorn qiling
+
+          # ----------------------------------------------------
+          # Everything else (normal wheels)
+          # ----------------------------------------------------
           else
-            echo "Standard target — installing from PyPI..."
+            echo "=== Standard target — installing from PyPI ==="
             "$PY_ABS_PATH" -m pip install keystone-engine capstone unicorn qiling
           fi
 
