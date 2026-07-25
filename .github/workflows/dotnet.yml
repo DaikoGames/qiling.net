@@ -1,28 +1,101 @@
-# This workflow will build a .NET project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
-
-name: .NET
+name: Standalone Python & Qiling Test Matrix
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
-  build:
+  test-qiling:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
 
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- LINUX ---
+          - name: "Linux x64"
+            os: ubuntu-latest
+            arch_triple: "x86_64-unknown-linux-gnu"
+            py_bin: "python/bin/python3"
+
+          - name: "Linux ARM64"
+            os: ubuntu-24.04-arm
+            arch_triple: "aarch64-unknown-linux-gnu"
+            py_bin: "python/bin/python3"
+
+          # --- MACOS ---
+          - name: "macOS x64"
+            os: macos-13
+            arch_triple: "x86_64-apple-darwin"
+            py_bin: "python/bin/python3"
+
+          - name: "macOS ARM64"
+            os: macos-latest
+            arch_triple: "aarch64-apple-darwin"
+            py_bin: "python/bin/python3"
+
+          # --- WINDOWS ---
+          - name: "Windows x64"
+            os: windows-latest
+            arch_triple: "x86_64-pc-windows-msvc"
+            py_bin: "python/python.exe"
+
+          - name: "Windows x86"
+            os: windows-latest
+            arch_triple: "i686-pc-windows-msvc"
+            py_bin: "python/python.exe"
+
+          - name: "Windows ARM64"
+            os: windows-11-vs2022-arm64
+            arch_triple: "aarch64-pc-windows-msvc"
+            py_bin: "python/python.exe"
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 8.0.x
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Build
-      run: dotnet build --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Ensure zstd tool is available
+        run: |
+          if ! command -v zstd &> /dev/null; then
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              choco install zstd -y
+            elif [[ "$RUNNER_OS" == "macOS" ]]; then
+              brew install zstd
+            fi
+          fi
+
+      - name: Download & Extract Standalone Python
+        run: |
+          PYTHON_VER="3.11.8"
+          RELEASE_TAG="20240224"
+          TRIPLE="${{ matrix.arch_triple }}"
+          
+          FILE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-install_only_stripped.tar.zst"
+          URL="https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE_TAG}/${FILE_NAME}"
+
+          echo "Downloading: $URL"
+          curl -sSL -o python_standalone.tar.zst "$URL"
+
+          echo "Decompressing and Extracting..."
+          zstd -d python_standalone.tar.zst --stdout | tar -xvf -
+
+      - name: Verify Python & Pip
+        run: |
+          ${{ matrix.py_bin }} --version
+          ${{ matrix.py_bin }} -m pip --version
+
+      - name: Install Qiling Framework
+        run: |
+          ${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel
+          ${{ matrix.py_bin }} -m pip install qiling
+
+      - name: Test Qiling Import
+        run: |
+          ${{ matrix.py_bin }} -c "import qiling; print('Qiling loaded successfully!')"
