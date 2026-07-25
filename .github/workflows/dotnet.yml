@@ -113,85 +113,110 @@ jobs:
           ./${{ matrix.py_bin }} --version
           ./${{ matrix.py_bin }} -m pip --version
 
-      - name: Install Qiling Framework (Build Native ARM64 from Source)
+      - name: Install Qiling & Dependencies
         run: |
           PY_ABS_PATH="$(pwd)/${{ matrix.py_bin }}"
           echo "Python path: $PY_ABS_PATH"
 
           "$PY_ABS_PATH" -m pip install --upgrade pip setuptools wheel ninja cmake
 
+          # ----------------------------------------------------
+          # SPECIAL HANDLING: Windows ARM64 Source Compilation
+          # ----------------------------------------------------
           if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.msvc_arch }}" = "arm64" ]; then
+            echo "Detected Windows ARM64 target. Executing custom source builds for Keystone & Unicorn..."
+
             export CMAKE_GENERATOR="Ninja"
             export CMAKE_BUILD_TYPE="Release"
 
-            # ----------------------------------------------------
-            # A. Capstone
-            # ----------------------------------------------------
-            echo "=== Installing Capstone ==="
+            # 1. Install Capstone
             "$PY_ABS_PATH" -m pip install capstone
 
-            # ----------------------------------------------------
-            # B. Keystone Engine (Native ARM64 Source Build)
-            # ----------------------------------------------------
-            echo "=== Building Keystone Engine for ARM64 ==="
+            # 2. Keystone Engine (Native Windows ARM64 Build)
+            echo "=== Building Keystone Engine for Windows ARM64 ==="
             git clone --depth 1 https://github.com/keystone-engine/keystone.git
             
-            # Patch Keystone CMake policy
             "$PY_ABS_PATH" -c "p='keystone/CMakeLists.txt'; f=open(p); c=f.read().replace('cmake_minimum_required(VERSION 2.8.12)', 'cmake_minimum_required(VERSION 3.10)').replace('cmake_policy(SET CMP0051 OLD)', 'cmake_policy(SET CMP0051 NEW)'); open(p,'w').write(c)"
 
-            # Build Keystone C/C++ DLL via Ninja for ARM64
             mkdir -p keystone/build_arm64
             cd keystone/build_arm64
             cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" ..
             ninja
             cd "$GITHUB_WORKSPACE"
 
-            # Copy generated keystone.dll into binding target path
             mkdir -p keystone/bindings/python/keystone
-            find keystone/build_arm64 -name "keystone.dll" -exec cp {} keystone/bindings/python/keystone/ \;
+            find keystone/build_arm64 -name "*.dll" -exec cp {} keystone/bindings/python/keystone/ \;
 
-            # Install Keystone Python bindings
             cd keystone/bindings/python
             "$PY_ABS_PATH" setup.py install
             cd "$GITHUB_WORKSPACE"
 
-            # ----------------------------------------------------
-            # C. Unicorn Engine (Native ARM64 Source Build)
-            # ----------------------------------------------------
-            echo "=== Building Unicorn Engine for ARM64 ==="
+            # 3. Unicorn Engine (Native Windows ARM64 Build)
+            echo "=== Building Unicorn Engine for Windows ARM64 ==="
             git clone --depth 1 https://github.com/unicorn-engine/unicorn.git
 
-            # 1. Disable MASM assembler and setjmp x86 wrapper on Windows ARM64
-            "$PY_ABS_PATH" -c "p='unicorn/CMakeLists.txt'; f=open(p); c=f.read().replace('enable_language(ASM_MASM)', '').replace('qemu/util/setjmp-wrapper-win32.asm', ''); open(p,'w').write(c)"
+            # Patch Unicorn source files for ARM64 MSVC compatibility
+            "$PY_ABS_PATH" -c "
+            import re, os
 
-            # 2. Fix unresolved __rdtsc() linker symbol across all unicorn source files
-            "$PY_ABS_PATH" -c "import os; [open(os.path.join(r, fn), 'w', encoding='utf-8').write(open(os.path.join(r, fn), 'r', encoding='utf-8', errors='ignore').read().replace('__rdtsc()', '0ULL')) for r, d, fs in os.walk('unicorn') for fn in fs if fn.endswith(('.c', '.h'))]"
+            # A. Strip x86 MASM assembler & setjmp win32 wrapper references
+            cm = 'unicorn/CMakeLists.txt'
+            if os.path.exists(cm):
+                with open(cm, 'r', encoding='utf-8') as f:
+                    c = f.read()
+                c = re.sub(r'(?i)enable_language\s*\(\s*ASM_MASM\s*\)', '# disabled ASM_MASM', c)
+                c = re.sub(r'.*setjmp-wrapper-win32\.asm.*', '', c)
+                with open(cm, 'w', encoding='utf-8') as f:
+                    f.write(c)
 
-            # Build Unicorn C/C++ DLL via Ninja for ARM64
+            # B. Clear setjmp-wrapper-win32.asm content
+            asm = 'unicorn/qemu/util/setjmp-wrapper-win32.asm'
+            if os.path.exists(asm):
+                with open(asm, 'w', encoding='utf-8') as f:
+                    f.write('')
+
+            # C. Define __rdtsc() macro in qemu/osdep.h
+            osdep = 'unicorn/qemu/include/qemu/osdep.h'
+            if os.path.exists(osdep):
+                with open(osdep, 'r', encoding='utf-8') as f:
+                    c = f.read()
+                patch = '\n#ifndef __rdtsc\n#define __rdtsc() (0ULL)\n#endif\n'
+                with open(osdep, 'w', encoding='utf-8') as f:
+                    f.write(patch + c)
+
+            # D. Add C fallback definition for __rdtsc() in uc.c for linker resolution
+            uc = 'unicorn/uc.c'
+            if os.path.exists(uc):
+                with open(uc, 'a', encoding='utf-8') as f:
+                    f.write('\n#include <stdint.h>\nuint64_t __rdtsc(void) { return 0ULL; }\n')
+            "
+
             mkdir -p unicorn/build_arm64
             cd unicorn/build_arm64
             cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DUNICORN_BUILD_TESTS=OFF ..
             ninja
             cd "$GITHUB_WORKSPACE"
 
-            # Copy generated unicorn.dll into binding target path
             mkdir -p unicorn/bindings/python/unicorn
-            find unicorn/build_arm64 -name "unicorn.dll" -exec cp {} unicorn/bindings/python/unicorn/ \;
+            find unicorn/build_arm64 -name "*.dll" -exec cp {} unicorn/bindings/python/unicorn/ \;
 
-            # Patch Unicorn setup.py to bypass build_libraries()
+            # Bypass setup.py build_libraries() trigger to prevent rebuild attempts
             "$PY_ABS_PATH" -c "p='unicorn/bindings/python/setup.py'; f=open(p); c=f.read().replace('build_libraries()', 'pass'); open(p,'w').write(c)"
 
             cd unicorn/bindings/python
             "$PY_ABS_PATH" setup.py install
             cd "$GITHUB_WORKSPACE"
 
-          else
-            # Standard PyPI install for all other architectures
-            "$PY_ABS_PATH" -m pip install keystone-engine capstone unicorn
-          fi
+            # 4. Install Qiling Framework
+            "$PY_ABS_PATH" -m pip install qiling --no-build-isolation
 
-          # Install Qiling Framework
-          "$PY_ABS_PATH" -m pip install qiling
+          else
+            # ----------------------------------------------------
+            # STANDARD HANDLING: All Other Platforms (PyPI Wheels)
+            # ----------------------------------------------------
+            echo "Standard platform detected. Installing from PyPI..."
+            "$PY_ABS_PATH" -m pip install keystone-engine capstone unicorn qiling
+          fi
 
       - name: Test Qiling Import
         run: |
