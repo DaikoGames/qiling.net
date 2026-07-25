@@ -75,7 +75,7 @@ jobs:
           TRIPLE="${{ matrix.arch_triple }}"
           
           FILE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-install_only.tar.gz"
-          URL="https://github.com/astral-sh/python-build-standalone/releases/${RELEASE_TAG}/${FILE_NAME}"
+          URL="https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE_TAG}/${FILE_NAME}"
 
           echo "Downloading: $URL"
           curl -sSL -o python_standalone.tar.zst "$URL"
