@@ -115,14 +115,11 @@ jobs:
 
       - name: Install Qiling Framework (Build Native ARM64 from Source)
         run: |
-          # 1. Grab absolute path to standalone python executable
           PY_ABS_PATH="$(pwd)/${{ matrix.py_bin }}"
           echo "Python path: $PY_ABS_PATH"
 
-          # 2. Base tooling
           "$PY_ABS_PATH" -m pip install --upgrade pip setuptools wheel ninja cmake
 
-          # Set environment for MSVC + Ninja on Windows ARM64
           if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.msvc_arch }}" = "arm64" ]; then
             export CMAKE_GENERATOR="Ninja"
             export CMAKE_BUILD_TYPE="Release"
@@ -134,26 +131,49 @@ jobs:
             "$PY_ABS_PATH" -m pip install capstone
 
             # ----------------------------------------------------
-            # B. Keystone Engine (Source Build)
+            # B. Keystone Engine (Native ARM64 Source Build)
             # ----------------------------------------------------
-            echo "=== Building Keystone Engine from Source ==="
+            echo "=== Building Keystone Engine for ARM64 ==="
             git clone --depth 1 https://github.com/keystone-engine/keystone.git
             
             # Patch Keystone CMake policy
             "$PY_ABS_PATH" -c "p='keystone/CMakeLists.txt'; f=open(p); c=f.read().replace('cmake_minimum_required(VERSION 2.8.12)', 'cmake_minimum_required(VERSION 3.10)').replace('cmake_policy(SET CMP0051 OLD)', 'cmake_policy(SET CMP0051 NEW)'); open(p,'w').write(c)"
 
+            # Compile Keystone via Ninja for ARM64
+            mkdir -p keystone/build_arm64
+            cd keystone/build_arm64
+            cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DLLVM_TARGETS_TO_BUILD="AArch64;X86" ..
+            ninja
+            cd "$GITHUB_WORKSPACE"
+
+            # Copy generated keystone.dll into binding target path
+            mkdir -p keystone/bindings/python/keystone
+            find keystone/build_arm64 -name "keystone.dll" -exec cp {} keystone/bindings/python/keystone/ \;
+
+            # Install Keystone Python bindings
             cd keystone/bindings/python
             "$PY_ABS_PATH" setup.py install
             cd "$GITHUB_WORKSPACE"
 
             # ----------------------------------------------------
-            # C. Unicorn Engine (Source Build)
+            # C. Unicorn Engine (Native ARM64 Source Build)
             # ----------------------------------------------------
-            echo "=== Building Unicorn Engine from Source ==="
+            echo "=== Building Unicorn Engine for ARM64 ==="
             git clone --depth 1 https://github.com/unicorn-engine/unicorn.git
 
-            # Patch Unicorn setup.py generator to use Ninja instead of VS 2019
-            "$PY_ABS_PATH" -c "p='unicorn/bindings/python/setup.py'; f=open(p); c=f.read().replace(\"'-G', 'Visual Studio 16 2019'\", \"'-G', 'Ninja'\").replace(\"'-A', 'x64'\", \"\").replace(\"'-G', 'Visual Studio 16 2019', '-A', 'x64'\", \"'-G', 'Ninja'\"); open(p,'w').write(c)"
+            # Compile Unicorn via Ninja for ARM64
+            mkdir -p unicorn/build_arm64
+            cd unicorn/build_arm64
+            cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DUNICORN_BUILD_TESTS=OFF ..
+            ninja
+            cd "$GITHUB_WORKSPACE"
+
+            # Copy generated unicorn.dll into binding target path
+            mkdir -p unicorn/bindings/python/unicorn
+            find unicorn/build_arm64 -name "unicorn.dll" -exec cp {} unicorn/bindings/python/unicorn/ \;
+
+            # Patch Unicorn setup.py to bypass setup.py's internal build trigger
+            "$PY_ABS_PATH" -c "p='unicorn/bindings/python/setup.py'; f=open(p); c=f.read().replace('build_libraries()', 'pass'); open(p,'w').write(c)"
 
             cd unicorn/bindings/python
             "$PY_ABS_PATH" setup.py install
@@ -164,7 +184,7 @@ jobs:
             "$PY_ABS_PATH" -m pip install keystone-engine capstone unicorn
           fi
 
-          # 3. Install Qiling
+          # Install Qiling Framework
           "$PY_ABS_PATH" -m pip install qiling
 
       - name: Test Qiling Import
