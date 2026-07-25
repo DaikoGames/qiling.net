@@ -74,7 +74,7 @@ jobs:
           RELEASE_TAG="20240224"
           TRIPLE="${{ matrix.arch_triple }}"
           
-          FILE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-install_only.tar.zst"
+          FILE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-install_only.tar.gz"
           URL="https://github.com/astral-sh/python-build-standalone/releases/${RELEASE_TAG}/${FILE_NAME}"
 
           echo "Downloading: $URL"
