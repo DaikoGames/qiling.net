@@ -79,8 +79,8 @@ jobs:
 
       - name: Download & Extract Standalone Python
         run: |
-          PYTHON_VER="3.13.14"
-          RELEASE_TAG="20260718"
+          PYTHON_VER="3.12.8"
+          RELEASE_TAG="20241206"
           TRIPLE="${{ matrix.arch_triple }}"
           FLAVOR="${{ matrix.flavor }}"
           
@@ -108,7 +108,7 @@ jobs:
           ./${{ matrix.py_bin }} --version
           ./${{ matrix.py_bin }} -m pip --version
 
-      - name: Install Qiling Framework
+      - name: Install Qiling Framework (Native ARM64 Build)
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             export MACOSX_DEPLOYMENT_TARGET=10.13
@@ -116,8 +116,14 @@ jobs:
             export CXXFLAGS="-mmacosx-version-min=10.13 -Wno-error=unguarded-availability-new"
           fi
 
-          ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel
-          ./${{ matrix.py_bin }} -m pip install --prefer-binary qiling
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            export CMAKE_POLICY_VERSION_MINIMUM=3.5
+            export CMAKE_GENERATOR="Ninja"
+            export CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release"
+          fi
+
+          ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel ninja
+          ./${{ matrix.py_bin }} -m pip install qiling
 
       - name: Test Qiling Import
         run: |
