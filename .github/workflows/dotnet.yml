@@ -152,8 +152,8 @@ jobs:
             echo "=== Building Unicorn Engine from Source ==="
             git clone --depth 1 https://github.com/unicorn-engine/unicorn.git
 
-            # Patch Unicorn setup.py generator to use Ninja
-            "$PY_ABS_PATH" -c "p='unicorn/bindings/python/setup.py'; f=open(p); c=f.read().replace(\"'-G', 'Visual Studio 16 2019'\", \"'-G', 'Ninja'\").replace(\"'-A', 'x64'\", \"\"); open(p,'w').write(c)"
+            # Patch Unicorn setup.py generator to use Ninja instead of VS 2019
+            "$PY_ABS_PATH" -c "p='unicorn/bindings/python/setup.py'; f=open(p); c=f.read().replace(\"'-G', 'Visual Studio 16 2019'\", \"'-G', 'Ninja'\").replace(\"'-A', 'x64'\", \"\").replace(\"'-G', 'Visual Studio 16 2019', '-A', 'x64'\", \"'-G', 'Ninja'\"); open(p,'w').write(c)"
 
             cd unicorn/bindings/python
             "$PY_ABS_PATH" setup.py install
