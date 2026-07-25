@@ -156,21 +156,28 @@ jobs:
             echo "=== Building Unicorn Engine for Windows ARM64 ==="
             git clone --depth 1 https://github.com/unicorn-engine/unicorn.git
 
-            # Patch Unicorn CMake to remove MASM and the assembly wrapper file
+            # Patch Unicorn CMake to remove MASM requirements
             sed -i 's/enable_language(ASM_MASM)/# disabled ASM_MASM/gI' unicorn/CMakeLists.txt
             sed -i '/setjmp-wrapper-win32\.asm/d' unicorn/CMakeLists.txt
-            > unicorn/qemu/util/setjmp-wrapper-win32.asm
+            echo "" > unicorn/qemu/util/setjmp-wrapper-win32.asm
 
-            # Prepend __rdtsc inline stub to qemu/osdep.h for MSVC ARM64
+            # Inject __rdtsc and native setjmp/longjmp wrappers into osdep.h for MSVC ARM64
             cat << 'EOF' > rdtsc_patch.h
-            #if defined(_MSC_VER) && defined(_M_ARM64)
-            #include <stdint.h>
-            static inline uint64_t __rdtsc(void) {
-                return 0ULL;
-            }
-            #define __rdtsc __rdtsc
-            #endif
-            EOF
+#if defined(_MSC_VER) && defined(_M_ARM64)
+#include <stdint.h>
+#include <setjmp.h>
+static inline uint64_t __rdtsc(void) {
+    return 0ULL;
+}
+#define __rdtsc __rdtsc
+#ifndef uc_qemu_setjmp
+#define uc_qemu_setjmp(env) setjmp(env)
+#endif
+#ifndef uc_qemu_longjmp
+#define uc_qemu_longjmp(env, val) longjmp(env, val)
+#endif
+#endif
+EOF
             cat rdtsc_patch.h unicorn/qemu/include/qemu/osdep.h > unicorn/qemu/include/qemu/osdep.h.tmp
             mv unicorn/qemu/include/qemu/osdep.h.tmp unicorn/qemu/include/qemu/osdep.h
             rm rdtsc_patch.h
