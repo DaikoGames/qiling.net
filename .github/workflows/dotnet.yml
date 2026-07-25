@@ -40,7 +40,7 @@ jobs:
             arch_triple: "x86_64-pc-windows-msvc"
             py_bin: "python/python.exe"
 
-          - name: "Windows x86"
+          - name: "Windows x86 (32-bit)"
             os: windows-latest
             arch_triple: "i686-pc-windows-msvc"
             py_bin: "python/python.exe"
@@ -68,16 +68,22 @@ jobs:
           PYTHON_VER="3.11.8"
           RELEASE_TAG="20240224"
           TRIPLE="${{ matrix.arch_triple }}"
-          
-          # Fixed extension to matching .tar.zst archive
-          FILE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-install_only_stripped.tar.zst"
-          URL="https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE_TAG}/${FILE_NAME}"
+          BASE_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE_TAG}"
+          BASE_NAME="cpython-${PYTHON_VER}+${RELEASE_TAG}-${TRIPLE}-install_only"
 
-          echo "Downloading: $URL"
-          curl -sSL -o python_standalone.tar.zst "$URL"
+          echo "Attempting download for target: ${TRIPLE}"
 
-          echo "Decompressing and Extracting..."
-          zstd -d python_standalone.tar.zst --stdout | tar -xvf -
+          if curl -sSL -f -o python_archive "$BASE_URL/${BASE_NAME}.tar.zst"; then
+            echo "Downloaded ${BASE_NAME}.tar.zst"
+          elif curl -sSL -f -o python_archive "$BASE_URL/${BASE_NAME}.tar.gz"; then
+            echo "Downloaded ${BASE_NAME}.tar.gz"
+          else
+            echo "Failed to locate archive asset on GitHub releases."
+            exit 1
+          fi
+
+          echo "Extracting archive..."
+          tar -xf python_archive
 
       - name: Verify Python & Pip
         run: |
