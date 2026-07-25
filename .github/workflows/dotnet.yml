@@ -113,28 +113,64 @@ jobs:
           ./${{ matrix.py_bin }} --version
           ./${{ matrix.py_bin }} -m pip --version
 
-      - name: Install Qiling Framework
+      - name: Install Qiling Framework (Build Native ARM64 from Source)
         run: |
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            export MACOSX_DEPLOYMENT_TARGET=10.13
-            export CFLAGS="-mmacosx-version-min=10.13 -Wno-error=unguarded-availability-new"
-            export CXXFLAGS="-mmacosx-version-min=10.13 -Wno-error=unguarded-availability-new"
-          fi
+          # 1. Base tools setup
+          ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel ninja cmake
 
-          if [ "${{ runner.os }}" = "Windows" ]; then
+          # Set build environment for MSVC + Ninja on Windows ARM64
+          if [ "${{ runner.os }}" = "Windows" ] && [ "${{ matrix.msvc_arch }}" = "arm64" ]; then
             export CMAKE_GENERATOR="Ninja"
-            export CMAKE_ARGS="-DCMAKE_POLICY_DEFAULT_CMP0051=NEW -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release"
+            export CMAKE_BUILD_TYPE="Release"
+
+            # ----------------------------------------------------
+            # A. Build Capstone (Native ARM64)
+            # ----------------------------------------------------
+            echo "=== Installing Capstone ==="
+            ./${{ matrix.py_bin }} -m pip install capstone
+
+            # ----------------------------------------------------
+            # B. Build Keystone Engine from Source
+            # ----------------------------------------------------
+            echo "=== Building Keystone Engine from Source ==="
+            git clone --depth 1 https://github.com/keystone-engine/keystone.git
+            
+            # Patch Keystone's outdated CMake minimum requirement
+            ./${{ matrix.py_bin }} -c "
+            path = 'keystone/CMakeLists.txt'
+            content = open(path).read()
+            content = content.replace('cmake_minimum_required(VERSION 2.8.12)', 'cmake_minimum_required(VERSION 3.10)')
+            content = content.replace('cmake_policy(SET CMP0051 OLD)', 'cmake_policy(SET CMP0051 NEW)')
+            open(path, 'w').write(content)"
+            cd keystone/bindings/python
+            ../../${{ matrix.py_bin }} setup.py install
+            cd ../../../
+
+            # ----------------------------------------------------
+            # C. Build Unicorn Engine from Source
+            # ----------------------------------------------------
+            echo "=== Building Unicorn Engine from Source ==="
+            git clone --depth 1 https://github.com/unicorn-engine/unicorn.git
+
+            # Patch Unicorn's setup.py to use Ninja instead of hardcoded VS 2019
+            ./${{ matrix.py_bin }} -c "
+            path = 'unicorn/bindings/python/setup.py'
+            content = open(path).read()
+            content = content.replace(\"'-G', 'Visual Studio 16 2019'\", \"'-G', 'Ninja'\")
+            content = content.replace(\"'-A', 'x64'\", \"\")
+            open(path, 'w').write(content)"
+            
+            cd unicorn/bindings/python
+            ../../${{ matrix.py_bin }} setup.py install
+            cd ../../../
+
+          else
+            # Non-Windows ARM64 platforms can install standard PyPI wheels
+            ./${{ matrix.py_bin }} -m pip install keystone-engine capstone unicorn
           fi
 
-          ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel ninja "cmake<4.0.0"
-
-          ./${{ matrix.py_bin }} -m pip install --no-build-isolation keystone-engine capstone unicorn || \
-          ./${{ matrix.py_bin }} -m pip install --no-build-isolation \
-            --config-settings="setup-args=-DCMAKE_POLICY_VERSION_MINIMUM=3.5" \
-            keystone-engine capstone unicorn
-
+          # 2. Install Qiling
           ./${{ matrix.py_bin }} -m pip install qiling
-
       - name: Test Qiling Import
         run: |
           ./${{ matrix.py_bin }} -c "import qiling; print('Qiling loaded successfully!')"
