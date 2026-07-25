@@ -113,7 +113,7 @@ jobs:
           ./${{ matrix.py_bin }} --version
           ./${{ matrix.py_bin }} -m pip --version
 
-      - name: Install Qiling Framework (Native ARM64 Build)
+      - name: Install Qiling Framework
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             export MACOSX_DEPLOYMENT_TARGET=10.13
@@ -123,16 +123,14 @@ jobs:
 
           if [ "${{ runner.os }}" = "Windows" ]; then
             export CMAKE_GENERATOR="Ninja"
-            export CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release"
+            export CMAKE_ARGS="-DCMAKE_POLICY_DEFAULT_CMP0051=NEW -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release"
           fi
 
           ./${{ matrix.py_bin }} -m pip install --upgrade pip setuptools wheel ninja "cmake<4.0.0"
 
+          ./${{ matrix.py_bin }} -m pip install --no-build-isolation keystone-engine capstone unicorn || \
           ./${{ matrix.py_bin }} -m pip install --no-build-isolation \
             --config-settings="setup-args=-DCMAKE_POLICY_VERSION_MINIMUM=3.5" \
-            keystone-engine capstone unicorn || \
-          ./${{ matrix.py_bin }} -m pip install --no-build-isolation \
-            --config-settings="cmake.define.CMAKE_POLICY_VERSION_MINIMUM=3.5" \
             keystone-engine capstone unicorn
 
           ./${{ matrix.py_bin }} -m pip install qiling
